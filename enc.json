@@ -1,7 +1,0 @@
-{
-    "latest_version": "3.7.1",
-    "changes": "Added New Server || Bug Fixes",
-    "notice": "1",
-    "dl_link": "https://github.com/SphinX2k6/pinautomate/releases/download/cotton/PinAutome.3.7.exe",
-    "servers": ["node01.minehost.xyz:25578", "eu3.astralaxis.one:3007", "2.56.164.24:19244"]
-}
