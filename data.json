@@ -3,5 +3,5 @@
     "changes": "Added New Server || Bug Fixes",
     "notice": "1",
     "dl_link": "https://github.com/SphinX2k6/pinautomate/releases/download/cotton/PinAutome.3.7.exe",
-    "servers": ["3.12.198.247:8080","2.56.164.24:19171","eu3.astralaxis.one:3007", "node01.minehost.xyz:25578", "2.56.164.24:19244"]
+    "servers": ["2.56.164.24:19171", "3.12.198.247:8080", "eu3.astralaxis.one:3007", "node01.minehost.xyz:25578", "2.56.164.24:19244"]
 }
