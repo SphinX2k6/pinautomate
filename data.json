@@ -1,8 +1,8 @@
 {
-    "latest_version": "5.2.9",
+    "latest_version": "5.3.0",
     "changes": "Added New Batch poster || Removed Server && Added inbuilt downloader || Bug Fixes",
     "development": "false",
     "notice": "5",
-    "dl_link": "https://github.com/SphinX2k6/pinautomate/releases/download/cotton/PinAuto.5.2.9.exe",
+    "dl_link": "https://github.com/SphinX2k6/pinautomate/releases/download/cotton/PinAuto.5.3.0.exe",
     "servers": ["3.17.78.75:8000", "2.56.164.24:19171", "2.56.164.24:19244"]
 }
