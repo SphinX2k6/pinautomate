@@ -1,5 +1,5 @@
 {
-    "latest_version": "5.5.55",
+    "latest_version": "5.5.56",
     "changes": "Added auto boards to avoid potencial conflicts",
     "development": "false",
     "notice": "5",
