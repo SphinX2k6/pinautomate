@@ -1,0 +1,818 @@
+// ==UserScript==
+// @name         Declutter Pinterest
+// @namespace    August4067
+// @version      0.6.0
+// @description  Removes intrusive Pinterest shopping promotions, ads, and clutter, and makes the website more user-friendly
+// @license      MIT
+// @match        https://www.pinterest.com/*
+// @match        https://*.pinterest.com/*
+// @match        https://*.pinterest.co.uk/*
+// @match        https://*.pinterest.fr/*
+// @match        https://*.pinterest.de/*
+// @match        https://*.pinterest.ca/*
+// @match        https://*.pinterest.jp/*
+// @match        https://*.pinterest.it/*
+// @match        https://*.pinterest.au/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=pinterest.com
+// @require      https://ajax.googleapis.com/ajax/libs/jquery/3.1.0/jquery.min.js
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_registerMenuCommand
+// @sandbox      Javascript
+// @downloadURL https://update.greasyfork.org/scripts/512469/Declutter%20Pinterest.user.js
+// @updateURL https://update.greasyfork.org/scripts/512469/Declutter%20Pinterest.meta.js
+// ==/UserScript==
+
+/*--- waitForKeyElements():  A utility function, for Greasemonkey scripts,
+    that detects and handles AJAXed content.
+
+    Usage example:
+
+        waitForKeyElements (
+            "div.comments"
+            , commentCallbackFunction
+        );
+
+        //--- Page-specific function to do what we want when the node is found.
+        function commentCallbackFunction (jNode) {
+            jNode.text ("This comment changed by waitForKeyElements().");
+        }
+
+    IMPORTANT: This function requires your script to have loaded jQuery.
+*/
+
+// Pulled from: https://gist.github.com/raw/2625891/waitForKeyElements.js
+function waitForKeyElements(
+  selectorTxt /* Required: The jQuery selector string that
+                        specifies the desired element(s).
+                    */,
+  actionFunction /* Required: The code to run when elements are
+                        found. It is passed a jNode to the matched
+                        element.
+                    */,
+  bWaitOnce /* Optional: If false, will continue to scan for
+                        new elements even after the first match is
+                        found.
+                    */,
+  iframeSelector /* Optional: If set, identifies the iframe to
+                        search.
+                    */,
+) {
+  var targetNodes, btargetsFound;
+
+  if (typeof iframeSelector == "undefined") targetNodes = $(selectorTxt);
+  else targetNodes = $(iframeSelector).contents().find(selectorTxt);
+
+  if (targetNodes && targetNodes.length > 0) {
+    btargetsFound = true;
+    /*--- Found target node(s).  Go through each and act if they
+            are new.
+        */
+    targetNodes.each(function () {
+      var jThis = $(this);
+      var alreadyFound = jThis.data("alreadyFound") || false;
+
+      if (!alreadyFound) {
+        //--- Call the payload function.
+        var cancelFound = actionFunction(jThis);
+        if (cancelFound) btargetsFound = false;
+        else jThis.data("alreadyFound", true);
+      }
+    });
+  } else {
+    btargetsFound = false;
+  }
+
+  //--- Get the timer-control variable for this selector.
+  var controlObj = waitForKeyElements.controlObj || {};
+  var controlKey = selectorTxt.replace(/[^\w]/g, "_");
+  var timeControl = controlObj[controlKey];
+
+  //--- Now set or clear the timer as appropriate.
+  if (btargetsFound && bWaitOnce && timeControl) {
+    //--- The only condition where we need to clear the timer.
+    clearInterval(timeControl);
+    delete controlObj[controlKey];
+  } else {
+    //--- Set a timer, if needed.
+    if (!timeControl) {
+      timeControl = setInterval(function () {
+        waitForKeyElements(
+          selectorTxt,
+          actionFunction,
+          bWaitOnce,
+          iframeSelector,
+        );
+      }, 300);
+      controlObj[controlKey] = timeControl;
+    }
+  }
+  waitForKeyElements.controlObj = controlObj;
+}
+
+// We will set the Pinterest page title to this, to remove
+// the flashing title notifications like Pinterest (2)
+const ORIGINAL_TITLE = "Pinterest";
+
+// SETTINGS
+const SETTING_REMOVE_SHOPPABLE_PINS = "removeShoppablePins";
+const SETTING_REMOVE_PIN_FOOTERS = "removePinFooters";
+const SETTING_REMOVE_NAVBAR_NOTIFICATION_ICON = "removeNotificationIcon";
+const SETTING_REMOVE_NAVBAR_MESSAGES_ICON = "removeMessagesIcon";
+const SETTING_REMOVE_COMMENTS = "removeComments";
+
+class Setting {
+  constructor(settingName, settingDisplayName, settingDefault) {
+    this.settingName = settingName;
+    this.settingDisplayName = settingDisplayName;
+    this.settingDefault = settingDefault;
+  }
+
+  currentValue() {
+    return GM_getValue(this.settingName, this.settingDefault);
+  }
+
+  toggleSetting() {
+    var current = this.currentValue();
+    GM_setValue(this.settingName, !current);
+  }
+}
+
+class SettingRemoveShoppablePins extends Setting {
+  constructor() {
+    super(SETTING_REMOVE_SHOPPABLE_PINS, "Remove shoppable pins", false);
+  }
+}
+
+class SettingRemovePinFooters extends Setting {
+  constructor() {
+    super(SETTING_REMOVE_PIN_FOOTERS, "Remove pin footers", false);
+  }
+}
+
+class SettingRemoveNavbarMessagesIcon extends Setting {
+  constructor() {
+    super(
+      SETTING_REMOVE_NAVBAR_MESSAGES_ICON,
+      "Remove navbar messages icon",
+      false,
+    );
+  }
+}
+
+class SettingRemoveNavbarNotificationsIcon extends Setting {
+  constructor() {
+    super(
+      SETTING_REMOVE_NAVBAR_NOTIFICATION_ICON,
+      "Remove navbar notifications icon",
+      false,
+    );
+  }
+}
+
+class SettingRemoveComments extends Setting {
+  constructor() {
+    super(SETTING_REMOVE_COMMENTS, "Remove pin comments", false);
+  }
+}
+
+const SETTINGS = {
+  [SETTING_REMOVE_SHOPPABLE_PINS]: new SettingRemoveShoppablePins(),
+  [SETTING_REMOVE_PIN_FOOTERS]: new SettingRemovePinFooters(),
+  [SETTING_REMOVE_COMMENTS]: new SettingRemoveComments(),
+  [SETTING_REMOVE_NAVBAR_MESSAGES_ICON]: new SettingRemoveNavbarMessagesIcon(),
+  [SETTING_REMOVE_NAVBAR_NOTIFICATION_ICON]:
+    new SettingRemoveNavbarNotificationsIcon(),
+};
+
+// MENU SETTINGS
+function toggleMenuSetting(settingName) {
+  var setting = SETTINGS[settingName];
+  setting.toggleSetting();
+  updateSettingsMenu();
+  console.debug(`Setting ${settingName} set to: ${setting.currentValue()}}`);
+  location.reload();
+}
+
+function updateSettingsMenu() {
+  for (const [setting_name, setting] of Object.entries(SETTINGS)) {
+    GM_registerMenuCommand(
+      `${setting.settingDisplayName}: ${setting.currentValue() ? "Enabled" : "Disabled"}`,
+      () => {
+        toggleMenuSetting(setting_name);
+      },
+    );
+  }
+}
+
+// HELPER FUNCTIONS
+function waitAndRemove(selector, removeFunction) {
+  if (removeFunction == undefined) {
+    removeFunction = (elem) => elem.remove();
+  }
+
+  waitForKeyElements(selector, function (node) {
+    if (node && node.length > 0) {
+      removeFunction(node[0]);
+    }
+  });
+}
+
+/**
+ * Return an array of pins, filtering out those that already have
+ * style.display == "none" (pins that we have removed)
+ * @param {*} pins
+ * @returns array of pins
+ */
+function filterRemovedPins(pins) {
+  return pins ? pins.filter((pin) => pin.style.display !== "none") : [];
+}
+
+// DECLUTTER BOARDS
+/**
+ * Clean the Shop button from the top of boards (from the 3 button group with "Shop", "Organize", and "More ideas")
+ */
+function cleanShopButtonsFromBoard() {
+  console.debug("Cleaning Shop buttons from board");
+  waitForKeyElements('div[data-test-id="board-tools"]', function (node) {
+    var shopButton = node[0].querySelector('div[data-test-id="Shop"]');
+    if (shopButton) {
+      shopButton.style.display = "none";
+      console.debug("Removed Shop button from top of board");
+    }
+  });
+}
+
+/**
+ * Remove the banner of shopping pins wherever we find it (with title "Shop products inspired by this board").
+ * They sometimes show up at the top of boards, at the bottom of boards, and at the top of searches.
+ */
+function cleanShopByBanners() {
+  waitForKeyElements('div[data-test-id="sf-header-heading"]', function (node) {
+    var shopByBannerAtTopOfBoard = node[0].closest(
+      'div[class="PKX zI7 iyn Hsu"]',
+    );
+    if (shopByBannerAtTopOfBoard) {
+      shopByBannerAtTopOfBoard.style.display = "none";
+      console.debug("Removed shop by banner from top of board");
+    }
+
+    if (node[0].closest('div[data-test-id="base-board-pin-grid"]')) {
+      var shopByBannerAtBottomOfBoard = node[0].closest(
+        'div[class="gcw zI7 iyn Hsu"]',
+      );
+      if (shopByBannerAtBottomOfBoard) {
+        shopByBannerAtBottomOfBoard.style.display = "none";
+        console.debug("Removed shop by banner from bottom of board");
+      }
+    }
+
+    var shopByBannerAtTopOfSearch = node[0].closest('div[role="listitem"]');
+    if (shopByBannerAtTopOfSearch) {
+      shopByBannerAtTopOfSearch.style.display = "none";
+      console.debug("Removed shop by banner from top of search results");
+    }
+  });
+}
+
+// DECLUTTER NAVBAR
+/**
+ * The search bar now has dynamic placeholder text with suggested searches. These are distracting, and we will remove them.
+ */
+function cleanSearchBarDynamicText(searchBox) {
+  searchBox
+    .querySelector('div[data-test-id="dynamic-search-placeholder"]')
+    ?.remove();
+}
+
+function cleanSearchBarSuggestions(searchBox) {
+  var suggestionsMenu = searchBox.querySelector('div[id="SuggestionsMenu"]');
+  if (!suggestionsMenu) {
+    return;
+  }
+
+  var popularOnPinterestSuggestions = suggestionsMenu.querySelector(
+    'div[title="Popular on Pinterest"]',
+  );
+  if (popularOnPinterestSuggestions) {
+    var popularOnPinterestBanner = popularOnPinterestSuggestions.closest(
+      'div[class="jzS un8 L4V jDD"]',
+    );
+    if (popularOnPinterestBanner) {
+      popularOnPinterestBanner.style.display = "none";
+      console.debug("Removed Popular on Pinterest search suggestions");
+    }
+  }
+}
+
+/**
+ * A series of tabs is at the top of search results to refine results by your interests ("all", "holiday finds", "my board 1", "my board 2", etc).
+ * We will remove the shopping / promoted tabs
+ */
+function cleanNavTabCarousel() {
+  waitForKeyElements('div[class="localNavTabCarousel"]', function (nodes) {
+    var navTabCarousel = nodes[0];
+    if (!navTabCarousel) {
+      return;
+    }
+
+    const promotedTabs = new Set(["holiday finds"]);
+    navTabCarousel.querySelectorAll('div[class="xuA"]').forEach((item) => {
+      if (!item.innerText) {
+        return;
+      }
+
+      var navTabText = item.innerText.trim().toLowerCase();
+      if (promotedTabs.has(navTabText)) {
+        item.style.display = "none";
+        console.debug(`Hid promoted nav tab: ${navTabText}`);
+      }
+    });
+  });
+}
+
+function removeBellIcon() {
+  if (SETTINGS[SETTING_REMOVE_NAVBAR_NOTIFICATION_ICON].currentValue()) {
+    const bellIconDiv = document.querySelector('div[data-test-id="bell-icon"]');
+    if (bellIconDiv) {
+      bellIconDiv.style.display = "none";
+      console.debug("Removed bell icon from navbar.");
+    }
+  }
+}
+
+function removeMessagesIcon() {
+  if (SETTINGS[SETTING_REMOVE_NAVBAR_MESSAGES_ICON].currentValue()) {
+    const messagesIconDiv = document.querySelector(
+      'div[aria-label="Messages"]',
+    );
+    if (messagesIconDiv) {
+      var messagesParent = messagesIconDiv.closest(
+        'div[class="XiG zI7 iyn Hsu"]',
+      );
+      if (messagesParent) {
+        messagesParent.style.display = "none";
+      }
+      console.debug("Removed messages button");
+    }
+  }
+}
+
+/**
+function removeNavBarTab(tabName) {
+  const navBarTab = document.querySelector(`div[data-test-id="${tabName}"]`);
+
+  navBarTab?.remove();
+  console.debug(`Removed navbar tab: ${tabName}`);
+}
+*/
+
+function removeExploreTabNotificationsIcon() {
+  console.debug("Removing notifications icon from Explore tab");
+  var exploreTab = document.querySelector('div[data-test-id="today-tab"]');
+  if (exploreTab) {
+    var notificationsIcon = exploreTab.querySelector(
+      'div[aria-label="Notifications"]',
+    );
+
+    if (notificationsIcon) {
+      notificationsIcon.style.display = "none";
+      console.debug("Removed notifications icon from Explore tab");
+    }
+  }
+}
+
+function cleanNavBarCallback(mutationsList) {
+  console.debug("Cleaning navbar");
+  removeBellIcon();
+  removeMessagesIcon();
+  var callbackCount = 0;
+  waitForKeyElements('div[data-test-id="today-tab"]', function (nodes) {
+    new MutationObserver((mutations, observer) => {
+      removeExploreTabNotificationsIcon();
+    }).observe(nodes[0], {
+      childList: true,
+      subtree: true,
+    });
+  });
+
+  removeExploreTabNotificationsIcon();
+
+  waitForKeyElements('div[id="searchBoxContainer"]', function (nodes) {
+    new MutationObserver((mutations, observer) => {
+      cleanSearchBarSuggestions(nodes[0]);
+      cleanSearchBarDynamicText(nodes[0]);
+    }).observe(nodes[0], {
+      childList: true,
+      subtree: true,
+    });
+  });
+
+  // TODO - enable with settings
+  // removeNavBarTab("home-tab");
+  // removeNavBarTab("today-tab");
+  // removeNavBarTab("create-tab");
+}
+
+function cleanNavBar() {
+  waitForKeyElements('div[id="HeaderContent"]', function (nodes) {
+    const headerContent = document.getElementById("HeaderContent");
+    if (headerContent) {
+      var observerCallCount = 0;
+      const observer = new MutationObserver((mutations, observer) => {
+        cleanNavBarCallback(mutations);
+        if (++observerCallCount >= 5) {
+          observer.disconnect();
+          console.debug("Disconnected cleanNavBar() mutation observer");
+        }
+      });
+
+      observer.observe(headerContent, {
+        childList: true,
+        subtree: true,
+      });
+      cleanNavBarCallback([]);
+    }
+  });
+}
+
+// DECLUTTER PINS
+function cleanShoppingAds(pins) {
+  const shoppingAdDivs = document.querySelectorAll(
+    "div.Ch2.zDA.IZT.CKL.tBJ.dyH.iFc.GTB.H2s",
+  );
+
+  shoppingAdDivs.forEach((adDiv) => {
+    let parent = adDiv.closest('div[role="listitem"]');
+    if (parent) {
+      parent.style.display = "none";
+      console.debug("Removed shopping container");
+    }
+  });
+}
+
+function cleanIdeasYouMightLove(pins) {
+  pins.forEach((pin) => {
+    if (
+      pin.textContent.toLowerCase().includes("ideas you might love") ||
+      pin.textContent.toLowerCase().includes("shop similar") ||
+      pin.textContent.toLowerCase().includes("shop featured boards")
+    ) {
+      pin.style.display = "none";
+      console.debug('Removed "Ideas you might love" item:', pin);
+    }
+  });
+}
+
+function removePinFooters(pins) {
+  if (!SETTINGS[SETTING_REMOVE_PIN_FOOTERS].currentValue()) {
+    return;
+  }
+
+  pins.forEach((pin) => {
+    const footer = pin.querySelector('div[data-test-id="pinrep-footer"]');
+    if (!footer) {
+      return;
+    }
+
+    if (footer) {
+      footer.style.display = "none";
+      console.debug("Removed pin footer:", footer);
+    }
+  });
+}
+
+/**
+ * Remove Shoppable Pins by looking for a little tag ("Shoppable Pin indicator") in the pin somewhere.
+ * Shoppable pin indicators could be in the footer, or as an svg on top of the image
+ */
+function removeShoppablePins(pins) {
+  if (!SETTINGS[SETTING_REMOVE_SHOPPABLE_PINS].currentValue()) {
+    return;
+  }
+
+  pins.forEach((pin) => {
+    const shoppableIndicator = pin.querySelector(
+      '[aria-label="Shoppable Pin indicator"]',
+    );
+
+    if (shoppableIndicator) {
+      pin.style.display = "none";
+      console.debug("Removed shoppable pin:", pin);
+    }
+  });
+}
+
+function removeSponsoredPins(pins, mutations) {
+  var promotedPinSelector =
+    'a[aria-label="Promoted by"], a[aria-label="Promoted by; Opens a new tab"], div[title="Sponsored"]';
+
+  pins.forEach((pin) => {
+    if (pin && pin.querySelector(promotedPinSelector)) {
+      pin.style.display = "none";
+    }
+  });
+
+  /*
+  if (mutations) {
+    mutations.forEach((mutation) => {
+      var listItem = mutation.nextSibling?.closest('div[role="listitem"]');
+      if (listItem && listItem.querySelector(promotedPinSelector)) {
+        listItem.style.display = "none";
+      }
+    });
+  } else {
+  }
+  */
+}
+
+/**
+ * Pinterest now has a "Shop now" module as the first result of some searches.
+ * We will remove this.
+ */
+function removeShoppingModule(pins) {
+  console.debug("Cleaning shopping modules");
+  if (pins) {
+    pins.forEach((pin) => {
+      var module = pin.querySelector("div.Module");
+      if (!module || !module.innerText) {
+        return;
+      }
+
+      const shoppingModuleTexts = new Set(["shop now", "continue shopping"]);
+      const innerTextLines = module.innerText
+        .trim()
+        .split("\n")
+        .map((x) => x.trim().toLowerCase());
+      for (var i = 0; i < innerTextLines.length; i++) {
+        if (shoppingModuleTexts.has(innerTextLines[i])) {
+          pin.style.display = "none";
+          console.debug("Removed shopping module");
+          break;
+        }
+      }
+    });
+  }
+}
+
+/**
+ * Pinterest now is promoting their own shopping boards (from the "Pinterest Shop" user). We
+ * will remove those.
+ */
+function removeFeaturedBoards(pins) {
+  if (pins) {
+    pins.forEach((pin) => {
+      if (pin.style.display === "none") {
+        return;
+      }
+
+      if (pin.querySelector('[data-test-id="pinRepPresentation"]')) {
+        return;
+      }
+      var innerText = pin.innerText ? pin.innerText.trim().toLowerCase() : "";
+
+      var splitText = innerText.split("\n").map((x) => x.trim().toLowerCase());
+      if (
+        splitText.includes("explore featured boards") ||
+        splitText.includes("pinterest shop")
+      ) {
+        pin.style.display = "none";
+        console.debug("Removed featured boards module");
+      }
+    });
+  }
+}
+
+function cleanRelatedPinsSection(mutations) {
+  console.debug("Cleaning related pins");
+  var pins = document.querySelectorAll('div[role="listitem"]');
+
+  cleanIdeasYouMightLove(pins);
+  cleanShoppingAds(pins);
+  removePinFooters(pins);
+  removeShoppablePins(pins);
+  removeSponsoredPins(pins, mutations);
+  removeShoppingModule(pins);
+  removeFeaturedBoards(pins);
+}
+
+function cleanProductListingPinPage() {
+  waitAndRemove('div[data-test-id="product-price"]');
+  waitAndRemove('div[data-test-id="pdp-product-metadata-domain-owner"]');
+  waitAndRemove(
+    'div[data-test-id="product-shop-button"]',
+    (elem) => (elem.parentElement.style.display = "none"),
+  );
+  waitAndRemove(
+    'div[data-test-id="product-description"]',
+    (elem) => (elem.parentElement.style.display = "none"),
+  );
+}
+
+function cleanPinVisualContainer() {
+  var pinVisualContainer = document.querySelector(
+    'div[data-test-id="closeup-visual-container"]',
+  );
+  if (pinVisualContainer) {
+    var buttonsOnPinImage =
+      pinVisualContainer.querySelectorAll('div[role="button"]');
+    if (buttonsOnPinImage) {
+      for (var i = 0; i < buttonsOnPinImage.length; i++) {
+        buttonsOnPinImage[i].style.display = "none";
+        console.debug("Hiding button from pin image");
+      }
+    }
+
+    var shopButton = pinVisualContainer.querySelector(
+      'div[data-test-id="experimental-closeup-image-overlay-layer-shop-button"]',
+    );
+    if (shopButton) {
+      shopButton.style.display = "none";
+    }
+  }
+}
+
+/**
+ * The collapsible layout seems to be only used for the "Shop the look" section.
+ * So we will remove it.
+ */
+function removeShopTheLookBannerFromPinDescriptionContainer(mutationsList) {
+  waitForKeyElements(
+    'div[data-test-id="collapsible-layout"]',
+    function (nodes) {
+      nodes[0].style.display = "none";
+      console.debug('Hid "Shop the look" section');
+    },
+  );
+}
+
+function cleanComments() {
+  if (SETTINGS[SETTING_REMOVE_COMMENTS].currentValue()) {
+    waitForKeyElements("#canonical-card", function (canonicalCards) {
+      if (canonicalCards && canonicalCards.length == 1) {
+        var canonicalCard = canonicalCards[0];
+        if (!canonicalCard) {
+          return;
+        }
+        var hasCommentsHeading =
+          canonicalCard.querySelector("#comments-heading") != null;
+        if (hasCommentsHeading) {
+          canonicalCard.style.display = "none";
+          console.debug("Removed comments section from pin");
+        }
+      }
+    });
+
+    waitForKeyElements(
+      'div[data-test-id="inline-comment-composer-container"]',
+      function (nodes) {
+        var commentBox = nodes[0];
+        if (commentBox) {
+          commentBox.style.display = "none";
+          console.debug("Removed comment box from pin");
+        }
+      },
+    );
+  }
+}
+
+function cleanPinDescriptionContainer() {
+  var pinDescriptionContainer = document.querySelector(
+    'div[data-test-id="description-content-container"]',
+  );
+
+  if (pinDescriptionContainer) {
+    var shopButton = pinDescriptionContainer.querySelector(
+      'div[data-test-id="product-shop-button"]',
+    );
+    if (shopButton) {
+      shopButton.style.display = "none";
+    }
+
+    new MutationObserver(
+      removeShopTheLookBannerFromPinDescriptionContainer,
+    ).observe(pinDescriptionContainer, {
+      childList: true,
+      subtree: true,
+    });
+    removeShopTheLookBannerFromPinDescriptionContainer([]);
+  }
+}
+
+/**
+ * Pinterest adds the number of notifications to the title
+ * in a distracting, flashing manner like Pinerest (2).
+ * So this will keep the page title at: Pinterest
+ */
+function enforceTitle() {
+  if (document.title !== ORIGINAL_TITLE) {
+    console.debug(
+      `Changing title from: ${document.title} to ${ORIGINAL_TITLE}`,
+    );
+    document.title = ORIGINAL_TITLE;
+  }
+}
+
+/**
+ * Pinterest now has a popup modal asking you to disable adblock, if it is present.
+ *
+ * We will remove this modal.
+ */
+function removeAntiAdblockModalIfExists() {
+  console.debug("Waiting for anti-Adblock modal");
+  waitForKeyElements('div[aria-label="Ad blocker modal"]', function (nodes) {
+    nodes[0]?.remove();
+    document.querySelector('div[name="trap-focus"]')?.remove();
+    document.body.style.overflow = "auto";
+    console.debug("Removed anti-Adblock modal");
+  });
+}
+
+// PAGE IDENTIFIERS
+function isProductPin() {
+  return document.getElementById("product-sticky-container ") != null;
+}
+
+function hasDescriptionContentContainer() {
+  return (
+    document.querySelector(
+      'div[data-test-id="description-content-container"]',
+    ) != null
+  );
+}
+
+function isBoard() {
+  return document.querySelector('div[data-test-id="board-header"]') != null;
+}
+
+function main() {
+  "use strict";
+  console.debug("Running main()");
+
+  updateSettingsMenu();
+  cleanNavBar();
+  cleanComments();
+  cleanNavTabCarousel();
+  removeAntiAdblockModalIfExists();
+
+  if (isProductPin()) {
+    cleanProductListingPinPage();
+  }
+
+  cleanShopButtonsFromBoard();
+  cleanShopByBanners();
+
+  // The nav tab tab carousel pops up after page load
+  waitForKeyElements('div[class="localNavTabCarousel"]', function (nodes) {
+    cleanNavTabCarousel();
+  });
+
+  cleanPinDescriptionContainer();
+  cleanPinVisualContainer();
+  // The pin visual container changes to add those little "shop" buttons
+  // over the top of the image, so we need to watch for those and remove them
+  waitForKeyElements(
+    'div[data-test-id="closeup-visual-container"]',
+    function (nodes) {
+      new MutationObserver((mutations, observer) => {
+        cleanPinVisualContainer();
+      }).observe(nodes[0], {
+        childList: true,
+        subtree: true,
+      });
+    },
+  );
+
+  const relatedPinsSectionCleanerObserver = new MutationObserver(
+    (mutations) => {
+      cleanRelatedPinsSection(mutations);
+    },
+  );
+
+  waitForKeyElements('div[role="list"]', function (node) {
+    // Related pins section must be watched for changes,
+    // as new pins pop up as the user scrolls
+    cleanRelatedPinsSection([]);
+    relatedPinsSectionCleanerObserver.observe(node[0], {
+      childList: true,
+    });
+  });
+
+  enforceTitle();
+  const titleElement = document.querySelector("title");
+  new MutationObserver(enforceTitle).observe(titleElement, { childList: true });
+}
+
+main();
+
+let lastUrl = window.location.href;
+setInterval(() => {
+  const currentUrl = window.location.href;
+  if (currentUrl !== lastUrl) {
+    console.debug(
+      `Detected new page, currentURL=${currentUrl}, previousURL=${lastUrl}`,
+    );
+    lastUrl = currentUrl;
+    main();
+  }
+}, 750);
