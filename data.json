@@ -1,7 +1,7 @@
 {
-    "latest_version": "5.5.68",
+    "latest_version": "5.5.691",
     "changes": "Added auto boards to avoid potencial conflicts",
     "development": "false",
     "notice": "5",
-    "dl_link": "https://github.com/SphinX2k6/pinautomate/releases/download/cotton/PinAuto.5.5.68.exe"
+    "dl_link": "https://github.com/SphinX2k6/pinautomate/releases/download/cotton/PinAuto.5.5.691.exe"
 }
